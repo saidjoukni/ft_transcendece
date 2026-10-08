@@ -3,7 +3,7 @@
 ## 1. Connection
 
 WebSocket URL:
-- ws://<backend>/room/{room_id}?token=<JWT>
+- ws://localhost/room/{room_id}
 
 Rules:
 - room_id comes from the URL path.
@@ -30,17 +30,7 @@ Notes:
 
 ### 3.1 Client -> Server
 
-1. START_GAME
-Purpose: host starts the match.
-
-```json
-{
-  "event": "START_GAME",
-  "data": {}
-}
-```
-
-2. SUBMIT_BLUFF
+1. SUBMIT_BLUFF
 Purpose: player submits fake answer.
 
 ```json
@@ -50,7 +40,7 @@ Purpose: player submits fake answer.
 }
 ```
 
-3. SUBMIT_VOTE
+2. SUBMIT_VOTE
 Purpose: player votes for the answer they think is true.
 
 ```json
@@ -60,7 +50,7 @@ Purpose: player votes for the answer they think is true.
 }
 ```
 
-4. CHAT_MESSAGE
+3. CHAT_MESSAGE
 Purpose: send a room chat message.
 
 ```json
@@ -70,7 +60,7 @@ Purpose: send a room chat message.
 }
 ```
 
-5. UPDATE_SETTINGS
+4. UPDATE_SETTINGS
 Purpose: host modifies room settings.
 ```json
 {
@@ -78,12 +68,14 @@ Purpose: host modifies room settings.
   "data": {
     "total_rounds": 5,
     "bluff_time": 30,
-    "voting_time": 20
+    "vote_time": 20,
+    "max_players": 10,
+    "language": "en" // "en" or "ar"
   }
 }
 ```
 
-6. KICK_PLAYER
+5. KICK_PLAYER
 Purpose: host removes a player from the room.
 ```json
 {
@@ -92,43 +84,50 @@ Purpose: host removes a player from the room.
 }
 ```
 
-7. LEAVE_ROOM
+6. LEAVE_ROOM
 Purpose: Player leaves a room.
 ```json
 {
   "event": "LEAVE_ROOM",
-  "data": { "player_id": "usr_1" }
-}
-```
-
-8. NEXT_ROUND
-Purpose: Host moves to the next round.
-```json
-{
-  "event": "NEXT_ROUND",
   "data": {}
 }
 ```
 
-9. GET_QUESTION
+7. NEXT_PHASE
+Purpose: Host moves to the next phase. Also used to start the game from the lobby.
+```json
+{
+  "event": "NEXT_PHASE",
+  "data": {}
+}
+```
+
+8. GET_QUESTION
 Purpose: Player requests a question from the selected category.
 ```json
 {
   "event": "GET_QUESTION",
-  "data": { "category": "Science" }
+  "data": { 
+    "category": {
+      "id": 1,
+      "name": "Science",
+      "language": "en"
+      }
+    }
 }
 ```
 
 ### 3.2 Server -> Client
 
 1. LOBBY_UPDATE (broadcast)
-Purpose: single lobby sync event after join/leave/ready/settings change.
+Purpose: single lobby sync event after join/leave/settings change.
 Note: is_present to indicate if a player is currently connected.
 
 ```json
 {
   "event": "LOBBY_UPDATE",
   "data": {
+    "round": 1,
     "host_id": "usr_1",
     "players": [
       { "id": "usr_1", "username": "alice", "is_present": true, "score": 0 }
@@ -136,8 +135,9 @@ Note: is_present to indicate if a player is currently connected.
     "settings": {
       "total_rounds": 5,
       "bluff_time": 30,
-      "voting_time": 20,
-      "max_players": 8
+      "vote_time": 20,
+      "max_players": 8,
+      "language": "en"
     }
   }
 }
@@ -149,7 +149,14 @@ Purpose: category selection phase.
 {
   "event": "PHASE_CATEGORY",
   "data": {
-    "categories": ["General Knowledge", "Science", "History"]
+    "round": 1,
+    "total_rounds": 5,
+    "duration": 30,
+    "categories": [
+      { "id": 1, "name": "General Knowledge", "image_url": "https://example.com/general_knowledge.png"},
+      { "id": 2, "name": "Science", "image_url": "https://example.com/science.png"},
+      { "id": 3, "name": "History", "image_url": "https://example.com/history.png"}
+    ]
   }
 }
 ```
@@ -161,9 +168,12 @@ Purpose: round starts and question is shown.
 {
   "event": "PHASE_QUESTION",
   "data": {
+    "category": "Geography",
+    "question": "Which country is known for its Alps?",
+    "question_id": 123,
+    "image_url": "https://example.com/question.png",  // can be None if no image is available for the question
     "round": 1,
     "total_rounds": 5,
-    "question": "In 1923, Liechtenstein adopted which neighbor currency?",
     "duration": 30
   }
 }
@@ -179,6 +189,10 @@ Purpose: voting starts with answer choices.
     "round": 1,
     "total_rounds": 5,
     "duration": 20,
+    "question": {
+      "text": "Which country is known for its Alps?",
+      "image_url": "https://example.com/alps.png"
+    },
     "choices": [
       { "id": "1", "text": "Austria" },
       { "id": "2", "text": "Switzerland" }
@@ -194,24 +208,27 @@ Purpose: reveal truth, votes, and updated scores.
 {
   "event": "RESULTS_REVEALED",
   "data": {
-    "correct_choice_id": "2",
+    "round": 1,
+    "total_rounds": 5,
     "choices": [
       {
         "id": "1",
         "text": "Austria",
-        "author_name": "usr_1",
-        "voters": ["usr_2, usr_3"]
+        "authors_names": ["usr_2"],
+        "voters": ["usr_2, usr_3"],
+        "is_correct": false
       },
       {
         "id": "2",
         "text": "Switzerland",
-        "author_name": null,
-        "voters": ["usr_1"]
+        "authors_names": null,
+        "voters": ["usr_1"],
+        "is_correct": true
       }
     ],
     "leaderboard": [
-      { "username": "alice", "score": 10 },
-      { "username": "bob", "score": 5 }
+      { "username": "alice", "score": 10, "avatar_url": "https://example.com/alice.png" },
+      { "username": "bob", "score": 5, "avatar_url": "https://example.com/bob.png" }
     ]
   }
 }
@@ -224,9 +241,11 @@ Purpose: final standings when match ends.
 {
   "event": "PHASE_PODIUM",
   "data": {
-    "winners": [
-      { "username": "alice", "score": 18 },
-      { "username": "bob", "score": 12 }
+    "round": 5,
+    "total_rounds": 5,
+    "leaderboard": [
+      { "username": "alice", "score": 18, "avatar_url": "https://example.com/alice.png" },
+      { "username": "bob", "score": 12, "avatar_url": "https://example.com/bob.png" }
     ]
   }
 }
@@ -239,8 +258,7 @@ Purpose: distribute room chat message.
 {
   "event": "CHAT_MESSAGE",
   "data": {
-    "player_id": "usr_1",
-    "username": "alice",
+    "player" : { "id": "usr_1", "username": "alice", "avatar_url": "https://example.com/alice.png" },
     "message": "Nice bluff"
   }
 }
@@ -271,18 +289,6 @@ Purpose: notify player that their bluff was rejected.
 }
 ```
 
-10. PLAYER_DISCONNECTED (broadcast)
-Purpose: notify room that a player has disconnected.
-```json
-{
-  "event": "PLAYER_DISCONNECTED",
-  "data": {
-    "player_id": "usr_2",
-    "player_name": "bob"
-  }
-}
-```
-
 11. BLUFF_SUBMITTED (broadcast)
 Purpose: notify room that a player has submitted their bluff.
 ```json
@@ -307,18 +313,13 @@ Purpose: notify room that a player has submitted their vote.
 
 ## 4. Recommended Error Codes
 
-- UNAUTHORIZED
 - FORBIDDEN
 - ROOM_NOT_FOUND
+- PLAYER_NOT_FOUND
 - FULL_ROOM
 - INVALID_PHASE
-- INVALID_ACTION
-- BLUFF_CORRECT
-- ALREADY_SUBMITTED
-- ALREADY_VOTED
+- BLUFF_REJECTED
 - INVALID_PAYLOAD
-- RATE_LIMITED
-- SERVER_ERROR
 
 ## 5. Minimal Flow
 
@@ -326,9 +327,66 @@ Purpose: notify room that a player has submitted their vote.
 2. Server sends LOBBY_UPDATE.
 3. Host sends START_GAME.
 4. Server sends PHASE_CATEGORY.
-5. Server sends PHASE_QUESTION.
-6. Players send SUBMIT_BLUFF.
-7. Server sends PHASE_VOTING.
-8. Players send SUBMIT_VOTE.
-9. Server sends PHASE_REVEAL.
-10. Repeat question loop or send PHASE_PODIUM.
+5. Player send GET_QUESTION.
+6. Server sends PHASE_QUESTION.
+7. Players send SUBMIT_BLUFF.
+8. Server sends PHASE_VOTING.
+9. Players send SUBMIT_VOTE.
+10. Server sends PHASE_REVEAL.
+11. Server sends PHASE_PODIUM.
+12. Repeat question loop or send LOBBY_UPDATE.
+
+
+## Reconnection and Refresh
+
+When a player reconnects, the server restores the player to the existing room and
+sends the state needed to rebuild the current screen. The client does not need to
+restart the game or request the current phase manually.
+
+### Server flow
+
+1. The client opens a new WebSocket connection for the same `room_id` and user.
+2. The server replaces the player's previous WebSocket with the new connection
+  and marks the player as present.
+3. The server sends a `LOBBY_UPDATE` to the room.
+4. The server sends the last saved phase event directly to the reconnecting player.
+5. The `duration` in the phase event is replaced with the remaining time. The
+  client should use this value to restart its local countdown.
+6. During `PHASE_QUESTION`, the server sends one `BLUFF_SUBMITTED` event for
+  each player who has already submitted a bluff.
+7. During `PHASE_VOTING`, the server sends one `VOTE_SUBMITTED` event for each
+  player who has already submitted a vote.
+
+The replayed phase event is sent only to the reconnecting player. The server does
+not run the phase handler again and does not create a new question, voting list,
+or timer.
+
+### Reconnection examples
+
+If a player reconnects during the question phase, the client receives:
+
+```text
+PHASE_QUESTION
+BLUFF_SUBMITTED for each player who already submitted
+```
+
+If a player reconnects during the voting phase, the client receives:
+
+```text
+PHASE_VOTING
+VOTE_SUBMITTED for each player who already voted
+```
+
+For `PHASE_CATEGORY`, `RESULTS_REVEALED`, and `PHASE_PODIUM`, only the saved
+phase event is replayed because those phases do not track submission progress.
+
+The `BLUFF_SUBMITTED` and `VOTE_SUBMITTED` messages are normally broadcasts, but
+when they are sent during reconnection they are direct messages for the returning
+player only.
+
+### Old connections
+
+If the same user opens a second connection, the first connection becomes stale.
+The server compares the WebSocket handling the message with the WebSocket stored
+for that player. A stale connection is stopped and cannot continue processing
+events after the newer connection becomes active.
