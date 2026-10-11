@@ -32,6 +32,9 @@ import type { Question, VotingOption } from "@/types/question";
 import type { AnswerReveal, FinalResults, RoundResults } from "@/types/results";
 import { useGameWebSocket } from "@/hooks/use-game-websocket";
 import { ErrorState } from "@/components/ui/error-state";
+import type { SessionUser } from "@/lib/websocket/session-user";
+import { InvitationListener } from "@/components/notifications/invitation-listener";
+import { gameErrorPresentation } from "@/lib/game-error";
 
 interface MockGameFlowState {
   currentPhase: GamePhase;
@@ -74,16 +77,19 @@ interface TriviaTrapGameProps {
   roomCode: string;
   roomId?: string;
   mockState?: string;
+  currentUser: SessionUser;
 }
 
-export function TriviaTrapGame({ roomCode, roomId, mockState }: TriviaTrapGameProps) {
+export function TriviaTrapGame({ roomCode, roomId, mockState, currentUser }: TriviaTrapGameProps) {
   const router = useRouter();
-  const websocket = useGameWebSocket(roomId);
+  const websocket = useGameWebSocket(roomId, currentUser);
   const [game, setGame] = useState<MockGameFlowState>(() =>
     createInitialState(roomCode, undefined, mockState),
   );
   const [showGameIntro, setShowGameIntro] = useState(false);
-  const [connectionState, setConnectionState] = useState<LobbyConnectionState>(() => lobbyConnectionForMockState(mockState));
+  const [connectionState] = useState<LobbyConnectionState>(() =>
+    lobbyConnectionForMockState(mockState),
+  );
   const introTimeoutRef = useRef<number | null>(null);
   const categoryTimeoutRef = useRef<number | null>(null);
   const categoryRequestedRef = useRef(false);
@@ -188,6 +194,9 @@ export function TriviaTrapGame({ roomCode, roomId, mockState }: TriviaTrapGamePr
   const playerScores = Object.fromEntries(
     game.roundStandings.players.map((player) => [player.id, player.totalScore]),
   );
+  const displayedError = websocket.error
+    ? gameErrorPresentation(websocket.error)
+    : null;
 
   useEffect(() => {
     return () => {
@@ -462,20 +471,12 @@ export function TriviaTrapGame({ roomCode, roomId, mockState }: TriviaTrapGamePr
     setGame(createInitialState(roomCode, "LOBBY"));
   }
 
-  function retryConnection() {
-    setConnectionState("connecting");
-    window.setTimeout(() => {
-      setConnectionState("restored");
-      window.setTimeout(() => setConnectionState("connected"), 1200);
-    }, 700);
-  }
-
   function leaveRoom() {
     if (leavingRoomRef.current) return;
-    if (roomId && !websocket.leaveRoom()) return;
     leavingRoomRef.current = true;
+    if (roomId) websocket.leaveRoom();
     setShowGameIntro(false);
-    router.push("/");
+    router.push("/dashboard");
   }
 
   function retryServerAction() {
@@ -517,14 +518,13 @@ export function TriviaTrapGame({ roomCode, roomId, mockState }: TriviaTrapGamePr
                 bluff_time: settings.bluffTime,
                 vote_time: settings.voteTime,
                 max_players: settings.maxPlayers,
-                language: settings.language ?? "en",
+                language: settings.language,
               });
             } : updateSettings}
             onSendMessage={roomId ? websocket.sendChatMessage : sendChatMessage}
             showMockChatTyping={!roomId}
             connectionState={roomId ? websocketConnectionState(websocket.connectionState) : connectionState}
             connectionError={roomId ? websocket.error : null}
-            onRetryConnection={roomId ? websocket.reconnect : retryConnection}
             onLeaveRoom={leaveRoom}
           />
         );
@@ -548,6 +548,7 @@ export function TriviaTrapGame({ roomCode, roomId, mockState }: TriviaTrapGamePr
             onSelectCategoryOption={roomId ? requestQuestion : undefined}
             canChoose={isCategoryChooser}
             chooserName={categoryChooser?.name}
+            language={roomLanguage}
           />
         );
       case "TRAP":
@@ -558,6 +559,7 @@ export function TriviaTrapGame({ roomCode, roomId, mockState }: TriviaTrapGamePr
             currentRound={websocket.questionPhase?.round ?? game.currentRound}
             totalRounds={websocket.questionPhase?.total_rounds ?? game.totalRounds}
             answer={roomId ? websocket.bluffAnswer : game.submittedTrapAnswer}
+            language={roomId ? roomLanguage : (game.settings.language ?? "en")}
             submitted={roomId ? websocket.bluffSubmitted : game.playerSubmitted}
             onAnswerChange={roomId ? websocket.setBluffAnswer : (answer) =>
               setGame((current) => ({
@@ -578,6 +580,7 @@ export function TriviaTrapGame({ roomCode, roomId, mockState }: TriviaTrapGamePr
             hasVoted={roomId ? websocket.voteSubmitted : game.playerVoted}
             seconds={websocket.votingPhase?.duration ?? game.timeRemaining}
             onCastVote={roomId ? websocket.submitVote : castVote}
+            language={roomLanguage}
           />
         );
       case "RESULTS_REVEAL":
@@ -591,6 +594,7 @@ export function TriviaTrapGame({ roomCode, roomId, mockState }: TriviaTrapGamePr
                 currentPhase: "ROUND_RESULTS",
               }))
             }
+            language={roomLanguage}
           />
         ) : (
           <div className="mx-auto w-full max-w-4xl px-4 py-8">
@@ -632,6 +636,7 @@ export function TriviaTrapGame({ roomCode, roomId, mockState }: TriviaTrapGamePr
 
   return (
     <main className="relative isolate min-h-dvh overflow-x-hidden bg-background text-foreground">
+      {roomId ? <InvitationListener /> : null}
       <div
         className="pointer-events-none fixed inset-0 overflow-hidden"
         aria-hidden="true"
@@ -698,8 +703,8 @@ export function TriviaTrapGame({ roomCode, roomId, mockState }: TriviaTrapGamePr
       websocket.connectionState === "CONNECTED" ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <ErrorState
-            title={serverErrorTitle(websocket.error.code)}
-            description={websocket.error.message}
+            title={displayedError?.title ?? "GAME ERROR"}
+            description={displayedError?.message ?? "Something went wrong. Please try again."}
             actionLabel={
               activePhase === "LOBBY" && isLiveHost ? "TRY AGAIN" : "DISMISS"
             }
@@ -718,11 +723,6 @@ export function TriviaTrapGame({ roomCode, roomId, mockState }: TriviaTrapGamePr
       ) : null}
     </main>
   );
-}
-
-function serverErrorTitle(code: string) {
-  if (code === "ERROR") return "SOMETHING WENT WRONG";
-  return code.replaceAll("_", " ");
 }
 
 function playersForMockState(mockState?: string): Player[] {

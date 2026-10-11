@@ -259,10 +259,6 @@ class Game(Base):
         ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    language_code: Mapped[str] = mapped_column(
-        String(5),
-        nullable=False,
-    )
     total_rounds: Mapped[int] = mapped_column(
         nullable=False,
     )
@@ -298,10 +294,6 @@ class GamePlayerResult(Base):
             "final_rank >= 1",
             name="check_game_player_result_rank",
         ),
-        CheckConstraint(
-            "bluff_votes_received >= 0",
-            name="check_game_player_result_bluff_votes",
-        ),
         Index(
             "ix_game_player_results_user_id",
             "user_id",
@@ -322,10 +314,6 @@ class GamePlayerResult(Base):
     )
     final_rank: Mapped[int] = mapped_column(
         nullable=False,
-    )
-    bluff_votes_received: Mapped[int] = mapped_column(
-        nullable=False,
-        server_default=text("0"),
     )
     game: Mapped["Game"] = relationship(
         back_populates="player_results",
@@ -456,6 +444,31 @@ class Friendship(Base):
     )
 
 
+class RoomInvitation(Base):
+    __tablename__ = "room_invitations"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'accepted', 'declined', 'expired')",
+            name="check_room_invitation_status",
+        ),
+        Index("ix_room_invitations_recipient_status", "recipient_id", "status"),
+        Index(
+            "uq_room_invitation_active",
+            "sender_id", "recipient_id", "room_code",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    sender_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    recipient_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    room_code: Mapped[str] = mapped_column(String(6), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'pending'"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class UserAchievement(Base):
     __tablename__ = "user_achievements"
 
@@ -466,13 +479,6 @@ class UserAchievement(Base):
     achievement_code: Mapped[str] = mapped_column(
         String(50),
         primary_key=True,
-    )
-    description: Mapped[str] = mapped_column(
-        Text,
-        nullable=False,
-    )
-    img: Mapped[str] = mapped_column(
-        String(50),
     )
     unlocked: Mapped[bool] = mapped_column(
         Boolean,

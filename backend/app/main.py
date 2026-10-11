@@ -1,14 +1,23 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+
 from engine.room_manager import router as room_router
 from engine.room_manager import get_available_rooms
 from users.router import router as user_router
-from fastapi.middleware.cors import CORSMiddleware
 from authentication.router import auth_router
 from authentication.session_cookie import ALLOWED_BROWSER_ORIGINS
-# from friendship.router import friends_router
+from dataProcessing.database import engine
+from friendship.router import friends_router
+from invitations.router import router as invitations_router
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 
 app = FastAPI()
+uploads_dir = Path(__file__).resolve().parents[1] / "uploads"
+uploads_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,9 +30,25 @@ app.add_middleware(
 app.include_router(room_router)
 app.include_router(user_router)
 app.include_router(auth_router)
-# app.include_router(friends_router)
+app.include_router(friends_router)
+app.include_router(invitations_router)
 
 
 @app.get("/rooms")
 def get_rooms():
     return get_available_rooms()
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/ready")
+async def ready():
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+        return {"status": "ready", "database": "ok"}
+    except Exception:
+        raise HTTPException(status_code=503, detail="Database unavailable")

@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import {
   ArrowRight,
@@ -24,19 +25,42 @@ import { apiFetch } from "@/lib/api";
 
 type Mode = "login" | "register" | "reset" | "new-password";
 
-function safeNextPath() {
-  const value = new URLSearchParams(window.location.search).get("next");
-  return value && value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\")
-    ? value
-    : "/profile";
+type ValidationIssue = { loc?: (string | number)[]; type?: string; msg?: string };
+
+function authValidationMessage(detail: unknown, mode: "login" | "register"): string {
+  if (!Array.isArray(detail)) return "Please check your details.";
+
+  const fields = mode === "register" ? ["username", "email", "password"] : ["email", "password"];
+  for (const field of fields) {
+    const issue = detail.find((entry: ValidationIssue) =>
+      entry && Array.isArray(entry.loc) && entry.loc[entry.loc.length - 1] === field
+    ) as ValidationIssue | undefined;
+    if (!issue) continue;
+
+    if (field === "username") {
+      if (issue.type === "missing") return "Enter a username.";
+      if (issue.type === "string_too_short") return "Username must be at least 3 characters.";
+      if (issue.type === "string_too_long") return "Username must be at most 15 characters.";
+      return issue.msg?.replace(/^Value error, /, "") ?? "Check your username.";
+    }
+    if (field === "email") return "Enter a valid email address.";
+    if (issue.type === "missing") return "Enter a password.";
+    if (issue.type === "too_short" || issue.type === "string_too_short") {
+      return mode === "login" ? "Enter your password." : "Password must be at least 7 characters.";
+    }
+    if (issue.type === "too_long" || issue.type === "string_too_long") return "Password must be at most 128 characters.";
+    return issue.msg?.replace(/^Value error, /, "") ?? "Check your password.";
+  }
+
+  return "Please check your details.";
 }
 
 export function LoginPage({ initialMode = "login", initialMessage = "" }: { initialMode?: Mode; initialMessage?: string }) {
+  const router = useRouter();
   const reducedMotion = useReducedMotion();
   const [mode, setMode] = useState<Mode>(initialMode);
   const [showPassword, setShowPassword] = useState(false);
   const [pending, setPending] = useState(false);
-  const [checkingSession, setCheckingSession] = useState(initialMode !== "new-password");
   const [message, setMessage] = useState(initialMessage);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -46,26 +70,6 @@ export function LoginPage({ initialMode = "login", initialMessage = "" }: { init
   const requestInFlight = useRef(false);
   const resetToken = useRef("");
   const createsPassword = mode === "register" || mode === "new-password";
-
-  useEffect(() => {
-    if (initialMode === "new-password") return;
-
-    let active = true;
-    apiFetch("/auth/me")
-      .then(response => {
-        if (!active) return;
-        if (response.ok) {
-          window.location.replace(safeNextPath());
-        } else {
-          setCheckingSession(false);
-        }
-      })
-      .catch(() => {
-        if (active) setCheckingSession(false);
-      });
-
-    return () => { active = false; };
-  }, [initialMode]);
 
   useEffect(() => {
     if (initialMode !== "new-password") return;
@@ -85,13 +89,14 @@ export function LoginPage({ initialMode = "login", initialMessage = "" }: { init
   const finishSignIn = useCallback(async () => {
     // Remove tokens left by the previous Local Storage implementation.
     localStorage.removeItem("access_token");
+    sessionStorage.removeItem("google_signup_credential");
     const session = await apiFetch("/auth/me");
     if (!session.ok) {
       setMessage("Sign-in succeeded, but the browser could not save your session. Check that the site and API use the same hostname.");
       return;
     }
-    window.location.assign(safeNextPath());
-  }, []);
+    router.replace("/dashboard");
+  }, [router]);
 
   const handleGoogleCredential = useCallback(async (credential: string) => {
     if (requestInFlight.current) return;
@@ -114,7 +119,12 @@ export function LoginPage({ initialMode = "login", initialMessage = "" }: { init
         }
         return;
       }
-      const data = (await response.json()) as { access_token?: string; token_type?: string };
+      const data = (await response.json()) as { requires_username?: boolean; access_token?: string; token_type?: string };
+      if (data.requires_username === true) {
+        sessionStorage.setItem("google_signup_credential", credential);
+        router.replace("/choose-username");
+        return;
+      }
       if (!data.access_token || data.token_type !== "bearer") {
         setMessage("The server did not return a valid login session. Please try again.");
         return;
@@ -126,10 +136,10 @@ export function LoginPage({ initialMode = "login", initialMessage = "" }: { init
       requestInFlight.current = false;
       setPending(false);
     }
-  }, [finishSignIn]);
+  }, [finishSignIn, router]);
 
-  function changeMode(next: Mode) {
-    if (pending) return;
+  function changeMode(next: Mode, afterRequest = false) {
+    if (pending && !afterRequest) return;
     setMode(next);
     setMessage("");
     setPassword("");
@@ -185,8 +195,20 @@ export function LoginPage({ initialMode = "login", initialMessage = "" }: { init
           setMessage("If that email has an account, a reset link is on its way.");
           return;
         }
+        if ((mode === "login" || mode === "register") && response.status === 422) {
+          const data = await response.json() as { detail?: unknown };
+          setMessage(authValidationMessage(data.detail, mode));
+          return;
+        }
+        if (mode === "register" && response.status === 409) {
+          const data = await response.json() as { detail?: unknown };
+          setMessage(typeof data.detail === "string" ? data.detail : "This username or email is already registered.");
+          return;
+        }
         let detail = "Something went wrong. Please try again.";
-        if (response.status === 401 || response.status === 400) detail = "Check your details and try again.";
+        if (mode === "login" && response.status === 409) detail = "This account uses Google sign-in. Select Continue with Google above.";
+        else if (mode === "login" && response.status === 401) detail = "Incorrect email or password.";
+        else if (response.status === 401 || response.status === 400) detail = "Check your details and try again.";
         else if (response.status === 409) detail = "That account already exists. Try signing in.";
         else if (response.status === 404) detail = "This sign-in option is not available yet.";
         setMessage(detail);
@@ -206,7 +228,7 @@ export function LoginPage({ initialMode = "login", initialMessage = "" }: { init
         }
         await finishSignIn();
       } else if (mode === "register") {
-        changeMode("login");
+        changeMode("login", true);
         setMessage("Account created. You can sign in now.");
       } else {
         setMessage("If that email has an account, a reset link is on its way.");
@@ -221,10 +243,6 @@ export function LoginPage({ initialMode = "login", initialMessage = "" }: { init
 
   const heading = mode === "login" ? "Welcome back." : mode === "register" ? "Join the game." : mode === "new-password" ? "Choose a new password." : "Reset your password.";
   const subtitle = mode === "login" ? "Sign in to your account and make your next move." : mode === "register" ? "Create an account. The room is waiting for you." : mode === "new-password" ? "Enter and confirm your new password to get back in the game." : "Enter your email and we’ll send you a reset link.";
-
-  if (checkingSession) {
-    return <main className="grid min-h-svh place-items-center bg-trap-canvas text-foreground" aria-label="Checking session"><LoaderCircle className="size-6 animate-spin" aria-hidden="true" /></main>;
-  }
 
   return (
     <main className="relative isolate min-h-svh overflow-x-hidden bg-trap-canvas text-foreground">
@@ -242,9 +260,9 @@ export function LoginPage({ initialMode = "login", initialMessage = "" }: { init
           transition={{ duration: reducedMotion ? 0.01 : 0.45 }}
           className="absolute inset-x-0 top-0 z-10 mx-auto flex max-w-[1360px] items-center justify-between gap-4 px-5 py-6 sm:px-10 sm:py-8 lg:px-16"
         >
-          <Link href="/" className="inline-flex items-center gap-2.5 text-sm font-black tracking-wide sm:text-base" aria-label="Trivia Trap home">
+          <Link href="/" className="inline-flex items-center gap-2.5 text-sm font-black tracking-wide text-primary sm:text-base" aria-label="Trivia Trap home">
             <span className="grid size-9 place-items-center rounded-xl border border-primary/30 bg-primary/10 text-primary"><Zap size={20} fill="currentColor" aria-hidden="true" /></span>
-            TRIVIA <span className="-ml-1 text-primary">TRAP</span>
+            <span>TRIVIA TRAP</span>
           </Link>
           <Button asChild variant="ghost" size="sm" className="gap-2 text-trap-text-dim"><Link href="/"><ArrowLeft size={14} /> Back to home</Link></Button>
         </motion.header>
@@ -293,7 +311,7 @@ export function LoginPage({ initialMode = "login", initialMessage = "" }: { init
                 <div className="my-6 flex items-center gap-4 text-[11px] text-trap-text-dim"><span className="h-px flex-1 bg-border" /> or use your email <span className="h-px flex-1 bg-border" /></div>
               </>}
 
-              <form onSubmit={handleSubmit} aria-busy={pending}>
+              <form onSubmit={handleSubmit} noValidate={mode === "login" || mode === "register"} aria-busy={pending}>
                 <fieldset disabled={pending} className="min-w-0 space-y-4">
                   {mode === "register" && <div>
                     <label htmlFor="username" className="mb-2 block text-xs font-bold text-trap-text-soft">Player name</label>
@@ -305,8 +323,8 @@ export function LoginPage({ initialMode = "login", initialMessage = "" }: { init
                   </div>}
                   {mode !== "reset" && <div>
                     <div className="mb-2 flex items-center justify-between gap-3"><label htmlFor="password" className="text-xs font-bold text-trap-text-soft">Password</label>{mode === "login" && <button type="button" onClick={() => changeMode("reset")} className="text-xs font-semibold text-trap-text-dim transition hover:text-trap-primary-soft">Forgot password?</button>}</div>
-                    <div className="relative"><Input id="password" name="password" type={showPassword ? "text" : "password"} required minLength={createsPassword ? 15 : undefined} maxLength={createsPassword ? 128 : undefined} autoComplete={createsPassword ? "new-password" : "current-password"} aria-describedby={createsPassword ? "password-help" : undefined} value={password} onChange={e => setPassword(e.target.value)} placeholder="Enter your password" className="pl-11 pr-12" /><LockKeyhole size={16} className="auth-input-icon" aria-hidden="true" /><Button type="button" variant="ghost" size="icon-sm" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword} className="absolute right-2 top-1/2 -translate-y-1/2 text-trap-text-dim">{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</Button></div>
-                    {createsPassword && <p id="password-help" className="mt-2 text-[11px] leading-5 text-trap-text-dim">15–128 characters with uppercase, lowercase, a number and a symbol; no spaces.</p>}
+                    <div className="relative"><Input id="password" name="password" type={showPassword ? "text" : "password"} required minLength={createsPassword ? 7 : undefined} maxLength={createsPassword ? 128 : undefined} autoComplete={createsPassword ? "new-password" : "current-password"} aria-describedby={createsPassword ? "password-help" : undefined} value={password} onChange={e => setPassword(e.target.value)} placeholder="Enter your password" className="pl-11 pr-12" /><LockKeyhole size={16} className="auth-input-icon" aria-hidden="true" /><Button type="button" variant="ghost" size="icon-sm" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword} className="absolute right-2 top-1/2 -translate-y-1/2 text-trap-text-dim">{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</Button></div>
+                    {createsPassword && <p id="password-help" className="mt-2 text-[11px] leading-5 text-trap-text-dim">7–128 characters with uppercase, lowercase, a number and a symbol; no spaces.</p>}
                   </div>}
                   {createsPassword && <div>
                     <label htmlFor="confirm-password" className="mb-2 block text-xs font-bold text-trap-text-soft">Confirm password</label>
@@ -325,6 +343,7 @@ export function LoginPage({ initialMode = "login", initialMessage = "" }: { init
               <div className="mt-7 border-t border-border pt-5 text-center text-xs leading-6 text-trap-text-dim">
                 {mode === "login" ? <>New to the trap? <button type="button" disabled={pending} onClick={() => changeMode("register")} className="font-bold text-trap-primary-soft hover:text-white disabled:opacity-50">Join the fun <span aria-hidden="true">↗</span></button></> : <>Already part of the party? <button type="button" disabled={pending} onClick={() => changeMode("login")} className="font-bold text-trap-primary-soft hover:text-white disabled:opacity-50">Sign in <span aria-hidden="true">↗</span></button></>}
               </div>
+              <p className="mt-4 text-center text-[11px] leading-5 text-trap-text-dim">See how Trivia Trap uses your data in our <Link href="/privacy" className="font-semibold text-trap-primary-soft underline underline-offset-2 hover:text-white">Privacy Policy</Link>.</p>
                 </motion.div>
               </AnimatePresence>
               </Card>

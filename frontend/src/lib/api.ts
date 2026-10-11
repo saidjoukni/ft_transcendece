@@ -2,6 +2,9 @@ const isLoopback = (hostname: string) => hostname === "localhost" || hostname ==
 
 function apiBaseUrl(): string {
   const configured = process.env.NEXT_PUBLIC_API_BASE_URL;
+  // Production browsers reach the API through the same HTTPS Nginx gateway.
+  if (!configured && process.env.NODE_ENV === "production") return "/api";
+
   const browserHost = typeof window === "undefined" ? undefined : window.location.hostname;
 
   // A login cookie belongs to a hostname, even when frontend and API use different ports.
@@ -15,6 +18,13 @@ function apiBaseUrl(): string {
   }
 
   return (configured ?? "http://localhost:8000").replace(/\/$/, "");
+}
+
+export function apiMediaUrl(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  if (/^(https?:|blob:|data:)/i.test(value)) return value;
+  const path = value.startsWith("/") ? value : `/${value}`;
+  return `${apiBaseUrl()}${path}`;
 }
 
 /** Browser requests include the HttpOnly login cookie automatically. */

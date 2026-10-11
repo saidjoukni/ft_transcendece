@@ -1,14 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   DoorOpen,
+  Languages,
   Pencil,
   MoreVertical,
   Play,
   Settings2,
-  Share2,
   ShieldCheck,
   Trash2,
   UserPlus,
@@ -49,6 +49,8 @@ import type { ServerErrorData } from "@/lib/websocket/websocket-types";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { WaitingArena } from "@/components/game/voting/waiting/waiting-arena";
 import { WaitingMessage } from "@/components/game/voting/waiting/waiting-message";
+import { InviteFriendsDialog } from "@/components/game/lobby/invite-friends-dialog";
+import { connectionErrorPresentation, gameErrorPresentation } from "@/lib/game-error";
 
 export type LobbyConnectionState =
   | "connected"
@@ -71,12 +73,11 @@ interface LobbyPhaseProps {
   showMockChatTyping?: boolean;
   connectionState?: LobbyConnectionState;
   connectionError?: ServerErrorData | null;
-  onRetryConnection?: () => void;
   onLeaveRoom?: () => void;
 }
 
 const settingFields: Array<{
-  key: keyof GameSettings;
+  key: "totalRounds" | "bluffTime" | "voteTime" | "maxPlayers";
   label: string;
   suffix: string;
   min: number;
@@ -119,41 +120,29 @@ export function LobbyPhase({
   showMockChatTyping = false,
   connectionState = "connected",
   connectionError,
-  onRetryConnection,
   onLeaveRoom,
 }: LobbyPhaseProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [draftSettings, setDraftSettings] = useState(settings);
-  const [shared, setShared] = useState(false);
-  const [shareFailed, setShareFailed] = useState(false);
+  const browserOrigin = useSyncExternalStore(
+    () => () => undefined,
+    () => window.location.origin,
+    () => "",
+  );
+  const joinPath = `/join?code=${encodeURIComponent(roomCode)}`;
+  const joinUrl = browserOrigin ? `${browserOrigin}${joinPath}` : joinPath;
   const reducedMotion = useReducedMotion();
   const eligiblePlayers = players.filter((player) => player.role !== "HOST");
   const readyPlayers = eligiblePlayers.filter(
     (player) => player.status !== "OFFLINE",
   );
+  const canStartGame = players.filter(
+    (player) => player.status !== "OFFLINE",
+  ).length >= 2;
   const openSlots = Math.max(0, settings.maxPlayers - players.length);
-  const joinUrl = `http://localhost:3000/room/${roomCode}`;
-
-  async function shareRoom() {
-    try {
-      if (navigator.share) {
-        await navigator.share({
-          title: "Join my Trivia Trap room",
-          text: `Join Trivia Trap with room code ${roomCode}`,
-          url: joinUrl,
-        });
-      } else {
-        await navigator.clipboard.writeText(joinUrl);
-      }
-      setShareFailed(false);
-      setShared(true);
-      window.setTimeout(() => setShared(false), 1600);
-    } catch {
-      setShared(false);
-      setShareFailed(true);
-    }
-  }
-
+  const connectionPresentation = connectionError
+    ? gameErrorPresentation(connectionError)
+    : connectionErrorPresentation;
   function saveSettings() {
     onSettingsChange(draftSettings);
     setSettingsOpen(false);
@@ -285,6 +274,9 @@ export function LobbyPhase({
                     </h2>
                   </div>
                   <RoomCode code={roomCode} />
+                  <div className="mt-3">
+                    <InviteFriendsDialog roomCode={roomCode} inviteUrl={joinUrl} playerIds={players.map((player) => player.id)} roomFull={openSlots === 0} />
+                  </div>
                   <div className="mt-4 grid grid-cols-[96px_1fr] items-center gap-4">
                     <div className="flex aspect-square items-center justify-center rounded-xl bg-white p-2">
                       <QRCodeSVG
@@ -302,25 +294,7 @@ export function LobbyPhase({
                       <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
                         Open the room instantly on another device.
                       </p>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        onClick={shareRoom}
-                        className="mt-3 w-full"
-                      >
-                        <Share2 className="size-3.5" />
-                        {shared ? "LINK COPIED" : "SHARE ROOM"}
-                      </Button>
-                      {shareFailed ? (
-                        <ErrorState
-                          title="UNABLE TO COPY LINK"
-                          description="Copy the room code manually and try again."
-                          actionLabel="TRY AGAIN"
-                          onAction={shareRoom}
-                          className="mt-3 p-3"
-                        />
-                      ) : null}
+                      <p className="mt-2 break-all text-[9px] leading-4 text-[#777782]">{joinUrl}</p>
                     </div>
                   </div>
                 </Card>
@@ -390,6 +364,33 @@ export function LobbyPhase({
                               />
                             </label>
                           ))}
+                          <fieldset className="sm:col-span-2">
+                            <legend className="mb-2 text-xs font-bold text-muted-foreground">
+                              QUESTION LANGUAGE
+                            </legend>
+                            <div className="grid grid-cols-2 gap-2">
+                              {([
+                                { code: "en", label: "ENGLISH" },
+                                { code: "ar", label: "العربية" },
+                              ] as const).map(({ code, label }) => (
+                                <button
+                                  key={code}
+                                  type="button"
+                                  aria-pressed={(draftSettings.language ?? "en") === code}
+                                  onClick={() => setDraftSettings((current) => ({ ...current, language: code }))}
+                                  className={cn(
+                                    "flex h-11 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                                    (draftSettings.language ?? "en") === code
+                                      ? "border-primary bg-primary/15 text-white"
+                                      : "border-border bg-background text-muted-foreground hover:border-primary/50 hover:text-white",
+                                  )}
+                                >
+                                  <Languages className="size-4" aria-hidden="true" />
+                                  <span lang={code}>{label}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </fieldset>
                         </div>
                         <DialogFooter className="mt-7">
                           <Button
@@ -424,6 +425,14 @@ export function LobbyPhase({
                       </p>
                     </div>
                   ))}
+                  <div className="col-span-2 flex items-center justify-between rounded-xl border border-white/[0.08] bg-black/15 p-3">
+                    <p className="text-[9px] font-black tracking-[0.1em] text-muted-foreground">
+                      QUESTION LANGUAGE
+                    </p>
+                    <p className="font-display text-sm font-black text-white" lang={settings.language === "ar" ? "ar" : "en"}>
+                      {settings.language === "ar" ? "العربية" : "ENGLISH"}
+                    </p>
+                  </div>
                 </div>
               </Card>
             </motion.div>
@@ -463,7 +472,9 @@ export function LobbyPhase({
                   </p>
                   <p className="mt-0.5 text-[11px] text-muted-foreground">
                     {isHost
-                      ? "Start when everyone has joined."
+                      ? canStartGame
+                        ? "Start when everyone has joined."
+                        : "At least 2 connected players are required."
                       : "Waiting for the host to start the game."}
                   </p>
                 </div>
@@ -473,6 +484,7 @@ export function LobbyPhase({
                   type="button"
                   size="lg"
                   onClick={onStartGame}
+                  disabled={!canStartGame}
                   className="w-full sm:w-auto sm:min-w-64"
                 >
                   <Play className="size-4 fill-current" /> START GAME
@@ -496,27 +508,10 @@ export function LobbyPhase({
         <div className="absolute inset-0 z-30 grid place-items-center bg-background/75 p-5 backdrop-blur-[2px]">
           {connectionState === "failed" ? (
             <ErrorState
-              title={
-                connectionError?.code === "FULL_ROOM"
-                  ? "ROOM FULL"
-                  : connectionError?.code == "GAME_IN_PROGRESS"
-                    ? "GAME IN PROGRESS"
-                    : connectionError?.code === "ROOM_NOT_FOUND"
-                      ? "ROOM NOT FOUND"
-                      : connectionError?.code === "FORBIDDEN"
-                      ? "ACCESS DENIED"
-                      : connectionError?.code === "PLAYER_NOT_FOUND"
-                        ? "PLAYER NOT FOUND"
-                        : "CONNECTION LOST"
-              }
-              description={
-                connectionError?.message ??
-                "We couldn&apos;t reconnect to the room."
-              }
-              actionLabel="RETRY"
-              onAction={onRetryConnection}
-              secondaryActionLabel="LEAVE ROOM"
-              onSecondaryAction={onLeaveRoom}
+              title={connectionPresentation.title}
+              description={connectionPresentation.message}
+              actionLabel="LEAVE ROOM"
+              onAction={onLeaveRoom}
               className="w-full max-w-lg bg-card"
             />
           ) : connectionState === "restored" ? (

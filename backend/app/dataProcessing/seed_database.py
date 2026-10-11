@@ -32,45 +32,87 @@ REQUIRED_FIELDS = {
 # These IDs belong to the JSON source. They are mapped to database IDs at run time.
 CATEGORY_SEEDS: dict[int, dict[str, Any]] = {
     1: {
-        "image_url": "/images/science.png",
+        "image_url": "/images/science.webp",
         "translations": {
             "en": "Science",
             "ar": "العلوم",
         },
     },
     2: {
-        "image_url": "/images/history.png",
+        "image_url": "/images/history.webp",
         "translations": {
             "en": "History",
             "ar": "التاريخ",
         },
     },
     3: {
-        "image_url": "/images/geography.png",
+        "image_url": "/images/geography.webp",
         "translations": {
             "en": "Geography",
             "ar": "الجغرافيا",
         },
     },
     4: {
-        "image_url": "/images/sports.png",
+        "image_url": "/images/sports.webp",
         "translations": {
             "en": "Sports",
             "ar": "الرياضة",
         },
     },
     5: {
-        "image_url": "/images/art-literature.png",
+        "image_url": "/images/art_literature.webp",
         "translations": {
             "en": "Art & Literature",
             "ar": "الفن والأدب",
         },
     },
     6: {
-        "image_url": "/images/technology.png",
+        "image_url": "/images/technology.webp",
         "translations": {
             "en": "Technology",
             "ar": "التكنولوجيا",
+        },
+    },
+    7: {
+        "image_url": "/images/animals_nature.webp",
+        "translations": {
+            "en": "Animals & Nature",
+            "ar": "الحيوانات والطبيعة",
+        },
+    },
+    8: {
+        "image_url": "/images/anime.webp",
+        "translations": {
+            "en": "Anime",
+            "ar": "الأنمي",
+        },
+    },
+    9: {
+        "image_url": "/images/movies_tv.webp",
+        "translations": {
+            "en": "Movies & TV",
+            "ar": "الأفلام والتلفزيون",
+        },
+    },
+    10: {
+        "image_url": "/images/gaming.webp",
+        "translations": {
+            "en": "Gaming",
+            "ar": "ألعاب الفيديو",
+        },
+    },
+    11: {
+        "image_url": "/images/weird_facts.webp",
+        "translations": {
+            "en": "Weird Facts",
+            "ar": "حقائق غريبة",
+        },
+    },
+    12: {
+        "image_url": "/images/islamic_knowledge.webp",
+        "translations": {
+            "en": "Islamic Knowledge",
+            "ar": "الثقافة الإسلامية",
         },
     },
 }
@@ -447,7 +489,7 @@ async def seed_mock_user_data(
             continue
         started_at = joined_at + timedelta(days=game_number + 2)
         game = Game(
-            id=game_id, host_user_id=demo.id, language_code="en",
+            id=game_id, host_user_id=demo.id,
             total_rounds=2 * len(category_id_map), started_at=started_at,
             finished_at=started_at + timedelta(minutes=15),
             player_results=[],
@@ -456,7 +498,6 @@ async def seed_mock_user_data(
             rank = (player_number + game_number) % len(users) + 1
             game.player_results.append(GamePlayerResult(
                 user_id=user.id, final_rank=rank, final_score=(4 - rank) * 400,
-                bluff_votes_received=4 - rank,
                 category_results=[
                     GamePlayerCategoryResult(
                         category_id=category_id, questions_played=2,
@@ -471,14 +512,10 @@ async def seed_mock_user_data(
     mock_achievements = (
         {
             "code": "first_game",
-            "description": "Play your first game",
-            "img": "/images/achievements/first_game.png",
             "unlocked": False,
         },
         {
             "code": "first_win",
-            "description": "Win your first game",
-            "img": "/images/achievements/first_win.png",
             "unlocked": True,
         },
     )
@@ -488,13 +525,9 @@ async def seed_mock_user_data(
         if existing is None:
             session.add(UserAchievement(
                 user_id=demo.id, achievement_code=code,
-                description=achievement["description"],
-                img=achievement["img"],
                 unlocked=achievement["unlocked"],
             ))
         else:
-            existing.description = achievement["description"]
-            existing.img = achievement["img"]
             existing.unlocked = achievement["unlocked"]
     await session.flush()
     return demo

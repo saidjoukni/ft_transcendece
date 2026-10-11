@@ -1,5 +1,5 @@
 import unicodedata
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from random import shuffle
@@ -28,6 +28,10 @@ async def get_category_list(
         )
         .where(
             CategoryTranslation.language_code == language_code,
+            exists().where(
+                Question.category_id == Category.id,
+                Question.language_code == language_code,
+            ),
         )
         .order_by(Category.id)
     )
@@ -363,7 +367,7 @@ def calculate_results(
     votes: dict[str, str],
     players: dict[str, "PlayerInfo"],
     voting_choices: list[dict],
-) -> dict:
+) -> dict | tuple[dict, dict[str, dict], dict[str, dict]]:
     choices_by_id = prepare_voting_choices(
         voting_choices
     )
@@ -374,8 +378,11 @@ def calculate_results(
         choices_by_id=choices_by_id,
     )
 
-    return build_results_payload(
+    results = build_results_payload(
         choices_by_id=choices_by_id,
         player_stats=player_stats,
         players=players,
     )
+    # if include_details:
+    return results, player_stats, choices_by_id
+    # return results

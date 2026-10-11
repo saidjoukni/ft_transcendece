@@ -1,15 +1,11 @@
 "use client";
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { GameWebSocketClient } from "@/lib/websocket/websocket-client";
-import { createUuid, getSessionUser } from "@/lib/websocket/session-user";
+import { createUuid, type SessionUser } from "@/lib/websocket/session-user";
 import { createGameStore, initialGameStoreState } from "@/stores/game-store";
-export function useGameWebSocket(roomId?: string) {
+export function useGameWebSocket(roomId: string | undefined, sessionUser: SessionUser) {
   const store = useMemo(() => createGameStore(), []);
   const disconnectTimer = useRef<number | null>(null);
-  const sessionUser = useMemo(
-    () => typeof window === "undefined" ? null : getSessionUser(),
-    [],
-  );
   const client = useMemo(() => new GameWebSocketClient({
     onStateChange: store.setConnectionState,
     onMessage: (message) => {
@@ -57,23 +53,17 @@ export function useGameWebSocket(roomId?: string) {
         console.warn("[WS] Ignored malformed server event.");
       }
     },
-  }), [store, sessionUser?.id]);
+  }, sessionUser), [store, sessionUser]);
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot, () => initialGameStoreState);
   const updateSettings = useMemo(() => client.updateSettings.bind(client), [client]);
   const sendChatMessage = useMemo(() => client.sendChatMessage.bind(client), [client]);
   const kickPlayer = useMemo(() => client.kickPlayer.bind(client), [client]);
   const leaveRoom = useMemo(() => () => {
-    const sent = client.leaveRoom();
-    if (!sent) {
-      store.setError({
-        code: "LEAVE_FAILED",
-        message: "Could not leave the room. Check your connection and try again.",
-      });
-      return false;
-    }
+    // The server notification is best-effort: a disconnected player must still
+    // be able to clear local room state and leave the screen.
+    client.leaveRoom();
     client.disconnect();
     store.reset();
-    return true;
   }, [client, store]);
   const nextPhase = useMemo(() => client.nextPhase.bind(client), [client]);
   const returnToLobby = useMemo(() => client.returnToLobby.bind(client), [client]);
