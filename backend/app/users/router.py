@@ -11,6 +11,7 @@ from .schemas import UserProfile, GameHistoryResponse
 from users.utils import get_user_game_history
 from typing import Literal
 from pathlib import Path
+from uuid import uuid4
 from presence import mark_user_offline, mark_user_online
 from authentication.schemas import validate_username
 
@@ -83,7 +84,7 @@ async def get_my_game_history(
     current_user: Annotated[User, Depends(get_current_user)],
     limit: Annotated[int, Query(ge=1, le=50)] = 10,
     offset: Annotated[int, Query(ge=0)] = 0,
-    result: Literal["all", "wins", "losses", "draws"] = "all",
+    result: Literal["all", "wins", "losses"] = "all",
 ) -> GameHistoryResponse:
     return await get_user_game_history(
         db, current_user.id, limit=limit, offset=offset, result_filter=result
@@ -159,7 +160,7 @@ async def upload_avatar(
                 buffer.write(chunk)
     finally:
         await file.close()
-    await update_avatar_path(db, user.id, f"/uploads/{safe_filename}")
+    await update_avatar_path(db, user.id, f"/uploads/{safe_filename}?v={uuid4().hex}")
     return {
         "status": "success",
         "filename": safe_filename,

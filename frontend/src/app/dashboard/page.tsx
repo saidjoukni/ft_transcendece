@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { DashboardHeader } from "@/components/dashboard/dashboard-header";
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
+import { AvailableRooms } from "@/components/dashboard/available-rooms";
 import { FriendsOnline } from "@/components/dashboard/friends-online";
 import { QuickStats } from "@/components/dashboard/quick-stats";
-import { RecentActivity } from "@/components/dashboard/recent-activity";
 import { RecentGames } from "@/components/dashboard/recent-games";
 import { getUser, UserApiError } from "@/lib/getUser";
 import { loginPathFor } from "@/lib/auth-routing";
@@ -13,7 +13,7 @@ import { getGameHistory } from "@/lib/game-history";
 
 export const metadata: Metadata = {
   title: "Dashboard | Trivia Trap",
-  description: "Your Trivia Trap games, friends, scores, and recent activity.",
+  description: "Your Trivia Trap games, friends, and scores.",
 };
 
 export default async function DashboardPage() {
@@ -43,9 +43,7 @@ export default async function DashboardPage() {
         <RecentGames history={history} />
         <FriendsOnline />
       </div>
-      <div className="mt-4">
-        <RecentActivity />
-      </div>
+      <AvailableRooms />
     </DashboardShell>
   );
 }

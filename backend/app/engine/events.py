@@ -290,13 +290,8 @@ async def podium(manager: RoomManager, context: Context):
     """
     room = manager.rooms.get(context.room_id)
     # if the current round is greater than the total rounds, end the game and reset the room phase to LOBBY
-    # but if the two top players have the same score we add a tie breaker round, so we don't end the game yet.
     newly_unlocked = {}
-    game_finished = (
-        room.meta_data.current_round > room.meta_data.settings.total_rounds
-        and len(room.meta_data.podium) > 1
-        and room.meta_data.podium[0]["score"] != room.meta_data.podium[1]["score"]
-    )
+    game_finished = room.meta_data.current_round > room.meta_data.settings.total_rounds
     if game_finished:
         updated_state, newly_unlocked = evaluate_game_achievements(
             {entry["player_id"]: entry["score"] for entry in room.meta_data.podium},
@@ -320,11 +315,10 @@ async def podium(manager: RoomManager, context: Context):
                         }
                         for entry in room.meta_data.podium
                     ],
-                    category_results=[],
                 )
                 room.meta_data.game_results_saved = True
             except Exception:
-                logger.exception("Could not persist completed game %s", room.meta_data.game_id)
+                pass
             finally:
                 room.meta_data.game_results_saving = False
         room.meta_data.phase.end()
@@ -436,8 +430,8 @@ async def submit_vote(manager: RoomManager, context: Context):
 
     if not validation["is_valid"]:
         raise GameError(
-            validation["reason"],
-            "Vote rejected",
+            "VOTE_REJECTED",
+            f"{validation['reason']}",
         )
 
     room.meta_data.voting_results[context.user_id] = vote_choice

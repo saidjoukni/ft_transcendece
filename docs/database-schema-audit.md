@@ -1,12 +1,40 @@
 # Database schema usage audit
 
-Reviewed against the repository on 11 October 2026, before revision
+## Current schema review — 12 October 2026
+
+The current game saves match and player results, but its only call to
+`save_game_results` supplied an empty category-results list. No profile,
+history, achievement, or frontend API path reads category-result rows. Revision
+`dd6eaad59dfb` removes `game_player_category_results`, its four ORM
+relationships, and the unused save path. The table's composite foreign key,
+category foreign key, three count checks, primary key, and
+`ix_player_category_results_user_category` index disappear with it. All other
+current tables remain:
+
+| Table | Current use | Decision |
+| --- | --- | --- |
+| `categories`, `category_translations` | Seeded and read for language-aware category selection | Keep |
+| `questions`, `question_decoys` | Seeded and read for live questions and choices | Keep |
+| `users` | Authentication, profiles, friendships, invitations, and game identity | Keep |
+| `games`, `game_player_results` | Saved at podium and read by history/profile statistics | Keep |
+| `friendships` | Friend requests and accepted-friend checks | Keep |
+| `room_invitations` | Invitation creation, expiry, listing, and responses | Keep |
+| `user_achievements` | Persistent unlocks and profile display | Keep |
+
+An existing database may contain category-result rows from earlier fixtures or
+other writes. Export them before applying this migration if the historical data
+matters. Downgrading recreates the table and its constraints, but cannot
+restore deleted rows. The old migrations below remain unchanged.
+
+## Historical audit — 11 October 2026
+
+The following audit was reviewed before revision
 `d7c6a5b4e390`. The ORM and all Alembic revisions were compared with backend
 queries/writes, HTTP and WebSocket handlers, seed paths, frontend consumers, and
 tests. This inventory describes the schema immediately before cleanup; the
 four removed columns are called out below. No table was removed.
 
-## Tables and columns
+### Tables and columns
 
 | Table | Column(s) | Status before cleanup | Current evidence and decision |
 | --- | --- | --- | --- |
@@ -30,7 +58,7 @@ four removed columns are called out below. No table was removed.
 | `user_achievements` | `user_id`, `achievement_code`, `unlocked` | USED | `achievement_persistence` saves/loads unlocks; profile maps stored true rows to current definitions. Keep. |
 | `user_achievements` | `description`, `img` | CURRENTLY UNUSED after write | Persistence and mock seeding wrote them, but the profile response uses `ACHIEVEMENT_DEFINITIONS` for both values. Removed. |
 
-## Keys, foreign keys, checks, and indexes
+### Keys, foreign keys, checks, and indexes
 
 All primary keys were kept: single `id` keys on categories, questions, decoys,
 users, games, and invitations; `(category_id, language_code)` on translations;
@@ -55,7 +83,7 @@ users, invitation → sender and recipient, and achievement → user.
 | Friendship non-self/status checks, receiver index, and unordered-pair unique index | USED or INDIRECTLY USED | Repository relies on state values and unordered pair conflict handling. Keep. |
 | Invitation status check, recipient/status index, and active-invitation partial unique index | USED or INDIRECTLY USED | Listing/expiry filters by recipient/status; unique index rejects duplicate pending invitations. Keep. |
 
-## Safe removals and limits
+### Safe removals and limits
 
 For each candidate, searches covered ORM fields, SQLAlchemy expressions, raw
 SQL, services, authentication, users, engine, achievements, friendships,

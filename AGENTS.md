@@ -34,9 +34,9 @@ This file describes the repository as checked in. Before changing behavior, conf
 
 ## Database and achievements
 
-- `backend/app/dataProcessing/models.py` and Alembic define users, categories/translations, questions/decoys, friendships, room invitations, games, player/category results, and user achievements. Keep ORM changes paired with a reviewed Alembic migration. Preserve keys, foreign keys, checks, and uniqueness constraints that protect retained data.
-- `seed_database.py` validates/imports question JSON. `--with-mock-users` additionally writes development users, game history, friendships, and two sample achievements. Container startup seeds questions without mock users. Confirm the target database before seeding or migrating; use isolated data for tests.
-- At true game end, `events.podium` calls `services.save_game_results` to persist the game and player scores/ranks once. It currently passes an empty category-results list, so live games do not populate category analytics; mock seed history does.
+- `backend/app/dataProcessing/models.py` and Alembic define users, categories/translations, questions/decoys, friendships, room invitations, games, player results, and user achievements. Keep ORM changes paired with a reviewed Alembic migration. Preserve keys, foreign keys, checks, and uniqueness constraints that protect retained data.
+- `seed_database.py` validates/imports question JSON and seeds only categories, translations, questions, and decoys. Container startup runs this seed script. Confirm the target database before seeding or migrating; use isolated data for tests.
+- At true game end, `events.podium` calls `services.save_game_results` to persist the game and player scores/ranks once. Per-category game analytics are not persisted.
 - Achievement rows have a user/code key and `unlocked` flag. The profile API takes descriptions and images from the seven `ACHIEVEMENT_DEFINITIONS` entries, marking only persisted true rows unlocked; missing rows appear locked and legacy codes are excluded. `dataProcessing/achievement.py` evaluates five round rules, `SHARP_EYE`, and `HIGH_SCORER`. `achievement_persistence.py` saves new unlocks and loads stored unlocks at game start; current-game progress stays in room memory. Sample achievement names and frontend images do not define unlock rules.
 
 ## WebSocket and HTTP contracts
@@ -59,7 +59,7 @@ Run these from the repository root unless a command starts with `cd`.
 | Frontend checks | `cd frontend && pnpm run lint`; `cd frontend && pnpm run build` | No frontend test script is declared. |
 | Backend tests | `cd backend && uv run python -m pytest tests -q` | Supply `DATABASE_URL` and `JWT_SECRET_KEY`; current tests are unit tests and do not create a test database. Pytest config adds `backend` and `backend/app` to the import path. `make test` uses unittest discovery and is not verification for these tests. |
 | Migrate/check schema | `cd backend && uv run alembic upgrade head`; `cd backend && uv run alembic current`; `cd backend && uv run alembic check` | Supply `DATABASE_URL`; use an isolated PostgreSQL database for migration tests. |
-| Seed questions | `cd backend && uv run python -m app.dataProcessing.seed_database` | Add `--with-mock-users` only for local fixtures. |
+| Seed questions | `cd backend && uv run python -m app.dataProcessing.seed_database` | Seeds game content only. |
 
 `backend/.env.example` lists JWT, Google, mail, and password-reset settings. `DATABASE_URL` and `JWT_SECRET_KEY` are required when importing the backend. Do not commit credentials. The root Makefile also has `make google` to serve authentication docs and cleanup targets. `backend/app/authentication/docs/database.md` describes integration tests that are absent from this checkout.
 
